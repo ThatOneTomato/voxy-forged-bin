@@ -1,0 +1,36 @@
+# Changelog
+
+## Unreleased
+
+### Distant generation (new)
+- **Voxy now generates the terrain beyond your render distance by itself** on the integrated server (singleplayer/LAN host). Chunks are generated in expanding, distance-sorted rings around the player and ingested straight into the LOD store, so distant LODs fill in without ever having visited the area or importing region files.
+- Smart/fast by design:
+  - Chunks are generated only to the `LIGHT` chunk status (blocks + biomes + light) — no entity spawning, no promotion to full/ticking chunks — then released, so they unload immediately after ingestion. Generation runs on the vanilla chunk-system worker pool via async futures (`getChunkFutureMainThread`), never blocking the server thread; each chunk is kept alive during generation by a dedicated no-timeout ticket.
+  - Progress is remembered per world/dimension in a compact bitmap (1 bit per chunk, `<world>/voxy/distantgen/`), so already-ingested chunks are skipped across sessions and re-centers.
+  - Backpressure-aware: new chunks only start while server MSPT is below a configurable limit, the voxel ingest queue is shallow, and the save queue isn't backed up.
+- New config options (Sodium video settings page "Distant Generation" + `voxy-client.toml`): enable/disable, radius (default 96 chunks), concurrent chunk budget, MSPT limit.
+- New commands: `/voxy distantgen status|pause|resume|reset`.
+- When the standalone **Groundwork** pregeneration mod is installed, Voxy's built-in distant generation steps aside automatically - Groundwork takes over generation and feeds Voxy through its event bridge.
+
+## 1.0.0 — 2026-06-26
+
+First stable release of the NeoForge 1.21.1 port, updated to the modern **Sodium 0.8** backport.
+
+### Sodium 0.6 → 0.8 compatibility
+- Updated the Sodium dependency to `mc1.21.1-0.8.12-beta.2-neoforge`.
+- Reworked the build to compile against Sodium 0.8: its real classes ship inside a JiJ'd nested jar, which is now extracted onto the compile classpath, and Sodium is provided on the runtime classpath so the dev environment loads it like a normal install.
+- Updated `ShaderLoader` for Sodium 0.8's `ShaderParser.parseShader()` now returning a `ParsedShader`.
+- Updated the chunk-render mixins for Sodium 0.8 signature changes:
+  - `RenderSectionManager` constructor gained a `SortBehavior` parameter.
+  - `DefaultChunkRenderer.render()` gained a trailing `boolean` parameter.
+  - The chunk fade-in suppression hook (`RenderRegionManager`) is now optional — Sodium 0.8 removed the chunk fade-in entirely, so there is nothing to suppress.
+- Dropped the Sodium video-settings options page (Sodium 0.8 rewrote that GUI API). Voxy settings remain available via the Mods config menu.
+
+### Fixes
+- **Fixed chunks briefly disappearing (see-through gap) when they hand off from full detail to LOD.** Sodium 0.8 reports `RenderSection.setInfo() == false` during section disposal, which previously skipped clearing Voxy's LOD-occlusion mask, leaving the area masked-but-empty until something else cleared it. The mask is now cleared immediately when Sodium disposes a section, while transient rebuilds keep the existing smoothing delay.
+
+### Requirements
+- Minecraft 1.21.1
+- NeoForge 21.1.219+ (required by Forgified Fabric API)
+- Sodium `mc1.21.1-0.8.12-beta.2-neoforge` (or newer 0.8.x)
+- Forgified Fabric API `0.116.7+2.2.0+1.21.1`

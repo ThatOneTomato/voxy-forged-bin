@@ -1,0 +1,30 @@
+# Project exclude paths
+/.gradle/
+/.idea/
+/build/
+/run/
+/out/
+/logs/
+
+# Reference dependency clones for development
+/.reference/
+
+# Stray dev run logs at repo root (run*.log, fix*.log, etc.)
+*.log
+
+# Claude Code tooling state
+/.claude/
+
+# Agent orchestration task files
+/.agent/
+
+# Local deployment scripts (contain SSH config)
+/scripts/deploy.sh
+/scripts/build_and_deploy.sh
+/scripts/list_instances.sh
+/scripts/logs.sh
+/scripts/tail_logs.sh
+/scripts/grep_logs.sh
+
+# macOS metadata
+.DS_Store
