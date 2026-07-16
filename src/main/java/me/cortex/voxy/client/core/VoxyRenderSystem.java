@@ -325,7 +325,14 @@ public class VoxyRenderSystem {
             while (this.renderDistanceTracker.setCenterAndProcess(viewport.cameraX, viewport.cameraZ) && VoxyClient.isFrexActive());//While FF is active, run until everything is processed
             TimingStatistics.H.start();
             //Done here as is allows less gl state resetup
-            do { this.modelService.tick(900_000); } while (VoxyClient.isFrexActive() && !this.modelService.areQueuesEmpty());
+            {
+                //Scale the bake budget with the backlog: sections cannot be meshed until every block
+                // model they contain is baked, so a deep bake queue (e.g. a modpack's large blockstate
+                // palette on first encounter) stalls all LOD detail behind a 0.9ms/frame trickle
+                final int bakeQueue = this.modelService.getQueuedCount();
+                final long bakeBudget = bakeQueue > 2000 ? 8_000_000 : (bakeQueue > 200 ? 4_000_000 : 900_000);
+                do { this.modelService.tick(bakeBudget); } while (VoxyClient.isFrexActive() && !this.modelService.areQueuesEmpty());
+            }
             TimingStatistics.H.stop();
         }
         GPUTiming.INSTANCE.marker();
@@ -530,10 +537,16 @@ public class VoxyRenderSystem {
 
         //Limit to available dedicated memory if possible
         if (Capabilities.INSTANCE.canQueryGpuMemory) {
+            long freeVram = Capabilities.INSTANCE.getFreeDedicatedGpuMemory();
             //512mb less than avalible,
-            long limit = Capabilities.INSTANCE.getFreeDedicatedGpuMemory() - (long)(1.5*1024*1024*1024);//1.5gb vram buffer
+            long limit = freeVram - (long)(1.5*1024*1024*1024);//1.5gb vram buffer
             // Give a minimum of 512 mb requirement
             limit = Math.max(512*1024*1024, limit);
+
+            if (limit < geometryCapacity) {
+                Logger.warn("Low free VRAM (" + (freeVram >> 20) + "mb): limiting Voxy geometry buffer to " + (limit >> 20) +
+                        "mb, LOD detail will be reduced. Free up VRAM (lighter shaderpack/lower resolution) or override with -Dvoxy.geometryBufferSizeOverrideMB=");
+            }
 
             geometryCapacity = Math.min(geometryCapacity, limit);
         }

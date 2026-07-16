@@ -599,6 +599,11 @@ public class AsyncNodeManager {
         return this.usedGeometryAmount;
     }
 
+    //Number of built sections waiting to be uploaded (grows when uploads are blocked on free geometry memory)
+    public int getPendingUploadCount() {
+        return this.geometryUpdateQueue.size();
+    }
+
     public long getGeometryCapacity() {
         return this.geometryCapacity;
     }
@@ -756,7 +761,7 @@ public class AsyncNodeManager {
     }
 
     public void addDebug(List<String> debug) {
-        debug.add("UC/GC: " + (this.getUsedGeometryCapacity()/(1<<20))+"/"+(this.getGeometryCapacity()/(1<<20)));
+        debug.add("UC/GC: " + (this.getUsedGeometryCapacity()/(1<<20))+"/"+(this.getGeometryCapacity()/(1<<20)) + " PU: " + this.getPendingUploadCount());
         //debug.add("GUQ/NRC: " + this.geometryUpdateQueue.size()+"/"+this.removeBatchQueue.size());
     }
 

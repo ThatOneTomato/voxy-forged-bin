@@ -102,6 +102,10 @@ public class ModelBakerySubsystem {
         this.factory.addBiome(biomeEntry);
     }
 
+    public int getQueuedCount() {
+        return this.blockIdCount.get();
+    }
+
     public void addDebugData(List<String> debug) {
         debug.add(String.format("MQ/IF/MC: %04d, %03d, %04d", this.blockIdCount.get(), this.factory.getInflightCount(),  this.factory.getBakedCount()));//Model bake queue/in flight/model baked count
     }

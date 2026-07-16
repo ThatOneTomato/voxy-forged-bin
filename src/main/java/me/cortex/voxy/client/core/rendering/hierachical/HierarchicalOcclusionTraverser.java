@@ -31,7 +31,9 @@ import static org.lwjgl.opengl.GL45.*;
 public class HierarchicalOcclusionTraverser {
     public static final boolean HIERARCHICAL_SHADER_DEBUG = System.getProperty("voxy.hierarchicalShaderDebug", "false").equals("true");
 
-    public static final int MAX_REQUEST_QUEUE_SIZE = 50;
+    //Per-frame cap on node descend requests; each request only descends one lod level, so a low cap
+    // multiplies the (request -> readback -> build -> upload) round trips needed to reach full detail
+    public static final int MAX_REQUEST_QUEUE_SIZE = 128;
     public static final int MAX_QUEUE_SIZE = 200_000;
 
 
@@ -188,8 +190,8 @@ public class HierarchicalOcclusionTraverser {
         //MemoryUtil.memPutFloat(ptr, viewport.height); ptr += 4;
 
         final float screenspaceAreaDecreasingSize = VoxyConfig.CONFIG.subDivisionSize*VoxyConfig.CONFIG.subDivisionSize;
-        //Screen space size for descending
-        MemoryUtil.memPutFloat(ptr, (float) (screenspaceAreaDecreasingSize) /(viewport.width*viewport.height)); ptr += 4;
+        //Screen space size for descending, scaled up under geometry memory pressure
+        MemoryUtil.memPutFloat(ptr, (float) (screenspaceAreaDecreasingSize*this.detailPressureScale) /(viewport.width*viewport.height)); ptr += 4;
 
         setFrustum(viewport, ptr); ptr += 4*4*6;
 
@@ -200,10 +202,29 @@ public class HierarchicalOcclusionTraverser {
 
         {
             final double TARGET_COUNT = 4000;//TODO: make this configurable, or at least dynamically computed based on throughput rate of mesh gen
-            double iFillness = Math.max(0, (TARGET_COUNT - this.meshGen.getTaskCount()) / TARGET_COUNT);
+            //Count sections stuck waiting for upload (geometry memory full) against the budget too,
+            // otherwise mesh gen keeps building sections that cannot land, ballooning native memory
+            double backlog = this.meshGen.getTaskCount() + this.nodeManager.getPendingUploadCount();
+            double iFillness = Math.max(0, (TARGET_COUNT - backlog) / TARGET_COUNT);
             iFillness = Math.pow(iFillness, 2);
             final int requestSize = (int) Math.ceil(iFillness * MAX_REQUEST_QUEUE_SIZE);
             MemoryUtil.memPutInt(ptr, Math.max(0, Math.min(MAX_REQUEST_QUEUE_SIZE, requestSize)));ptr += 4;
+        }
+    }
+
+    //Scales the subdivision threshold when the geometry buffer cannot hold the working set at the
+    // configured detail: rendering the whole scene slightly coarser (but stable, and still able to
+    // stream in meshes) beats starving uploads and leaving areas stuck at minimum detail. Rises
+    // quickly while the store is pinned full, decays slowly once pressure clears; 1.0 = no scaling.
+    private float detailPressureScale = 1.0f;
+    private void updateDetailPressure() {
+        double fullness = ((double) this.nodeManager.getUsedGeometryCapacity()) / Math.max(1, this.nodeManager.getGeometryCapacity());
+        //The cleaner holds fullness at ~0.875 when eviction is keeping up, so above 0.95 means
+        // eviction has run out of stale geometry and the visible working set itself doesnt fit
+        if (fullness > 0.95) {
+            this.detailPressureScale = Math.min(this.detailPressureScale * 1.004f, 16.0f);
+        } else if (fullness < 0.90) {
+            this.detailPressureScale = Math.max(this.detailPressureScale * 0.9995f, 1.0f);
         }
     }
 
@@ -217,6 +238,7 @@ public class HierarchicalOcclusionTraverser {
     }
 
     public void doTraversal(Viewport<?> viewport) {
+        this.updateDetailPressure();
         this.uploadUniform(viewport);
         //UploadStream.INSTANCE.commit(); //Done inside traversal
 
@@ -349,6 +371,12 @@ public class HierarchicalOcclusionTraverser {
 
     public GlBuffer getNodeBuffer() {
         return this.nodeBuffer;
+    }
+
+    public void addDebug(java.util.List<String> debug) {
+        if (this.detailPressureScale != 1.0f) {
+            debug.add(String.format("LOD detail pressure: %.2fx coarser (geometry memory limited)", Math.sqrt(this.detailPressureScale)));
+        }
     }
 
     public void free() {
