@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 
 public class VoxyConfig {
     private static final Gson GSON = new GsonBuilder()
@@ -89,9 +90,14 @@ public class VoxyConfig {
                     } else {
                         Logger.error("Failed to load voxy config, resetting");
                     }
-                } catch (IOException e) {
-                    Logger.error("Could not parse config", e);
+                } catch (Exception e) {
+                    // Nothing may escape here: this runs from the static initialiser, so any throw becomes an
+                    // ExceptionInInitializerError, which leaves the class permanently unusable and takes mod
+                    // loading down with it. Gson throws unchecked on malformed values (e.g. a fractional number
+                    // in an int field), so catch broadly and fall back to defaults.
+                    Logger.error("Could not parse config, resetting", e);
                 }
+                backupUnreadableConfig(path);
             }
             var config = new VoxyConfig();
             config.save();
@@ -101,6 +107,16 @@ public class VoxyConfig {
             config.enabled = false;
             config.enableRendering = false;
             return config;
+        }
+    }
+
+    // Moves a config we could not read aside instead of letting the reset overwrite it, so the user's
+    // settings survive for recovery and the bad file is still there to diagnose.
+    private static void backupUnreadableConfig(Path path) {
+        try {
+            Files.move(path, path.resolveSibling(path.getFileName() + ".broken"), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            Logger.error("Failed to back up unreadable config", e);
         }
     }
 
