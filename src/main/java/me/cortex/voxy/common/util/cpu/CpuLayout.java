@@ -5,7 +5,7 @@ import com.sun.jna.platform.win32.WinNT;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.ThreadUtils;
-import org.lwjgl.system.Platform;
+import net.minecraft.Util;
 import oshi.SystemInfo;
 
 import java.util.Arrays;
@@ -24,8 +24,10 @@ public class CpuLayout {
     }
 
     public static void setThreadAffinity(Affinity... affinities) {
-        var platform = Platform.get();
-        if (platform == Platform.WINDOWS) {
+        //Use MC's own platform detection instead of LWJGL's: this class is common code and LWJGL is not
+        // on the classpath of a dedicated server (upstream 7ed7c85)
+        var platform = Util.getPlatform();
+        if (platform == Util.OS.WINDOWS) {
             long[] msks = new long[affinities.length];
             short[] groups = new short[affinities.length];Arrays.fill(groups, (short) -1);
             int i = 0;
@@ -36,7 +38,7 @@ public class CpuLayout {
                 msks[idx] |= a.msk;
             }
             ThreadUtils.SetThreadSelectedCpuSetMasksWin32(Arrays.copyOf(msks, i), Arrays.copyOf(groups, i));
-        } else if (platform == Platform.LINUX) {
+        } else if (platform == Util.OS.LINUX) {
             Arrays.sort(affinities, (a, b) -> a.group - b.group);
             long[] msks = new long[affinities.length];
             for (int i=0; i<affinities.length; i++) {
@@ -128,13 +130,20 @@ public class CpuLayout {
 
     public static final Core[] CORES;
     static {
-        if (Platform.get() == Platform.WINDOWS) {
-            CORES = generateCoreLayoutWindows();
-        } else if (Platform.get() == Platform.LINUX) {
-            CORES = generateCoreLayoutLinux();
-        } else {
-            CORES = null;
+        //JNA/oshi probing can fail on exotic systems; without the catch that would be an
+        // ExceptionInInitializerError and a hard crash at startup instead of a fallback
+        Core[] cores = null;
+        try {
+            var platform = Util.getPlatform();
+            if (platform == Util.OS.WINDOWS) {
+                cores = generateCoreLayoutWindows();
+            } else if (platform == Util.OS.LINUX) {
+                cores = generateCoreLayoutLinux();
+            }
+        } catch (Exception e) {
+            Logger.error("Failed to generate cpu core layout, falling back to null: ", e);
         }
+        CORES = cores;
     }
 
     public static void main(String[] args) throws InterruptedException {

@@ -2,6 +2,9 @@ package me.cortex.voxy.client;
 
 import me.cortex.voxy.client.config.VoxyConfig;
 import net.minecraft.client.renderer.FogRenderer;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.material.FogType;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -32,6 +35,17 @@ public class VoxyClientEvents {
         if (event.getMode() == FogRenderer.FogMode.FOG_TERRAIN
                 && VoxyConfig.CONFIG.enabled
                 && VoxyConfig.CONFIG.enableRendering) {
+
+            // Vision-restricting fog must survive: fog from being inside lava/water/powder snow, or from
+            // blindness/darkness, is computed in the same FOG_TERRAIN pass we override. Pushing it away
+            // let the player see straight through lava and defeated the blindness effect.
+            if (event.getCamera().getFluidInCamera() != FogType.NONE) {
+                return;
+            }
+            if (event.getCamera().getEntity() instanceof LivingEntity le
+                    && (le.hasEffect(MobEffects.BLINDNESS) || le.hasEffect(MobEffects.DARKNESS))) {
+                return;
+            }
 
             // Push fog to very large values (not MAX_VALUE to avoid shader math issues)
             // This removes the fog wall at vanilla render distance

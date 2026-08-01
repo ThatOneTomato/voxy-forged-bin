@@ -59,7 +59,9 @@ public class IrisUtil {
     }
 
     private static boolean irisShaderPackEnabled0() {
-        return Iris.isPackInUseQuick();
+        //isPackInUseQuick() consults the active pipeline and can disagree with reality around shader
+        // reloads/startup; getCurrentPack() reflects whether a pack is actually loaded (upstream 4c41a16)
+        return Iris.getCurrentPack().isPresent();
     }
 
     public static boolean irisShaderPackEnabled() {

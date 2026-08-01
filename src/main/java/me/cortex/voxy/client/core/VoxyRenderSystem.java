@@ -209,6 +209,12 @@ public class VoxyRenderSystem {
                 height = (int) (height*factor[1]);
             }
         }
+        //The scaling factor can floor a tiny window down to zero; a 0-sized viewport builds an incomplete
+        // framebuffer and crashes, so skip the frame instead (renderOpaque treats a null viewport as no-op)
+        if (width == 0 || height == 0) {
+            Logger.error("Viewport width or height was zero, skipping frame");
+            return null;
+        }
 
         viewport
                 .setVanillaProjection(matrices.projection())

@@ -346,7 +346,7 @@ public class RenderDataFactory {
     private static final long LM = (0xFFL<<55);
 
     private static boolean shouldMeshNonOpaqueBlockFace(int face, long quad, long meta, long neighborQuad, long neighborMeta) {
-        if (((quad^neighborQuad)&(0xFFFFL<<26))==0 && (DISABLE_CULL_SAME_OCCLUDES || (ModelQueries.cullsSame(meta)||ModelQueries.faceOccludes(meta, face)))) return false;//This is a hack, if the neigbor and this are the same, dont mesh the face// TODO: FIXME
+        if (((quad^neighborQuad)&(0xFFFFL<<26))==0 && (DISABLE_CULL_SAME_OCCLUDES || ModelQueries.cullsSame(meta))) return false;//This is a hack, if the neigbor and this are the same, dont mesh the face// TODO: FIXME
         if (!ModelQueries.faceExists(meta, face)) return false;//Dont mesh if no face
         if (ModelQueries.faceCanBeOccluded(meta, face)) //TODO: maybe enable this
           if (ModelQueries.faceOccludes(neighborMeta, face^1)) return false;
@@ -1017,7 +1017,7 @@ public class RenderDataFactory {
                         long meta = this.modelMan.getModelMetadataFromClientId(this.modelMan.getModelId(Mapper.getBlockId(neighborId)));
                         if (ModelQueries.isFullyOpaque(meta)) {
                             oki = false;
-                        } else if (CHECK_NEIGHBOR_FACE_OCCLUSION && ModelQueries.faceOccludes(meta, (2 << 1) | (1 - 1))) {
+                        } else if (CHECK_NEIGHBOR_FACE_OCCLUSION && ModelQueries.faceOccludes(meta, (2 << 1) | (1 - 0))) {
                             //TODO check self occlsion
                             oki = false;
                         }
@@ -1039,7 +1039,7 @@ public class RenderDataFactory {
                         long meta = this.modelMan.getModelMetadataFromClientId(this.modelMan.getModelId(Mapper.getBlockId(neighborId)));
                         if (ModelQueries.isFullyOpaque(meta)) {
                             oki = false;
-                        } else if (CHECK_NEIGHBOR_FACE_OCCLUSION && ModelQueries.faceOccludes(meta, (2 << 1) | (1 - 0))) {
+                        } else if (CHECK_NEIGHBOR_FACE_OCCLUSION && ModelQueries.faceOccludes(meta, (2 << 1) | (1 - 1))) {
                             //TODO check self occlsion
                             oki = false;
                         }
@@ -1694,9 +1694,12 @@ public class RenderDataFactory {
         aabb |= this.minX;
         aabb |= this.minY<<5;
         aabb |= this.minZ<<10;
-        aabb |= (this.maxX-this.minX-1)<<15;
-        aabb |= (this.maxY-this.minY-1)<<20;
-        aabb |= (this.maxZ-this.minZ-1)<<25;
+        //A section whose quads all lie in a single plane has max==min on that axis (the axis-position update
+        // uses the same value for both), so size-1 is -1; without the clamp that underflows the 5-bit field
+        // and corrupts the whole packed AABB, breaking culling for the section
+        aabb |= Math.max(0,this.maxX-this.minX-1)<<15;
+        aabb |= Math.max(0,this.maxY-this.minY-1)<<20;
+        aabb |= Math.max(0,this.maxZ-this.minZ-1)<<25;
 
         MemoryBuffer occupancy = null;
         if (BUILD_OCCUPANCY_SET && !this.occupancy.isEmpty()) {
