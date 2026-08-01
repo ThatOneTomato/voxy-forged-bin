@@ -383,14 +383,29 @@ public class ModelFactory {
         var colourProvider = getColourProvider(blockState.getBlock());
 
         boolean isBiomeColourDependent = false;
+        int constantTint = -1;
         if (colourProvider != null) {
-            isBiomeColourDependent = isBiomeDependentColour(colourProvider, blockState);
+            //Modded colour providers can throw when probed with the synthetic tint getter (they may cast the
+            // world or dereference block entities the getter stubs out with null/zero, e.g. Integrated
+            // Dynamics). An exception here propagates off the bakery thread and crashes the game, so treat
+            // such blocks as untinted instead.
+            try {
+                isBiomeColourDependent = isBiomeDependentColour(colourProvider, blockState);
+                if (!isBiomeColourDependent) {
+                    // MC 1.21.1: DEFAULT_BIOME is now Holder<Biome>, need .value() to get Biome
+                    constantTint = captureColourConstant(colourProvider, blockState, DEFAULT_BIOME.value())|0xFF000000;
+                }
+            } catch (Throwable t) {
+                Logger.warn("Colour provider for " + blockState + " threw while being probed, treating the block as untinted", t);
+                colourProvider = null;
+                isBiomeColourDependent = false;
+                constantTint = -1;
+            }
         }
 
         ModelEntry entry;
         {//Deduplicate same entries
-            // MC 1.21.1: DEFAULT_BIOME is now Holder<Biome>, need .value() to get Biome
-            entry = new ModelEntry(textureData, clientFluidStateId, isBiomeColourDependent||colourProvider==null?-1:captureColourConstant(colourProvider, blockState, DEFAULT_BIOME.value())|0xFF000000);
+            entry = new ModelEntry(textureData, clientFluidStateId, constantTint);
             int possibleDuplicate = this.modelTexture2id.getInt(entry);
             if (possibleDuplicate != -1) {//Duplicate found
                 this.idMappings[blockId] = possibleDuplicate;
@@ -577,7 +592,12 @@ public class ModelFactory {
             faceModelData |= ((!faceCoversFullBlock)&&blockRenderLayer != RenderType.translucent())?1<<23:0;//Alpha discard override, translucency doesnt have alpha discard
 
             //Bits 24,25 are tint metadata
-            if (colourProvider!=null) {//We have a tint
+            //A colour provider existing is not enough, it must also resolve to an actual tint. Dynamic Trees
+            // leaves register a provider that delegates to the vanilla BlockColors entry of the primitive
+            // leaves they mimic, and blocks like cherry/azalea (and various modded leaves) have no vanilla
+            // entry, so the provider returns -1 (= no tint). Marking those faces as tinted makes the shader
+            // multiply the texture by the -1 tint, which it maps to zero => solid black leaves.
+            if (colourProvider!=null && (isBiomeColourDependent || entry.tintingColour!=-1)) {//We have a tint
                 int tintState = TextureUtils.computeFaceTint(textureData[face], checkMode);
                 if (tintState == 2) {//Partial tint
                     faceModelData |= 1<<24;
@@ -617,16 +637,22 @@ public class ModelFactory {
             MemoryUtil.memPutInt(uploadPtr, -1);//Set the default to nothing so that its faster on the gpu
         } else if (!isBiomeColourDependent) {
             MemoryUtil.memPutInt(uploadPtr, entry.tintingColour);
-        } else if (!this.biomes.isEmpty()) {
-            //Populate the list of biomes for the model state
+        } else {
+            //Populate the list of biomes for the model state.
+            //Note: this must happen even when no biomes are known yet, otherwise the model is never added to
+            // modelsRequiringBiomeColours and addBiome0 can never fill in its colours, leaving it permanently
+            // reading slot 0 of the LUT (it is flagged as biome dependent regardless).
             int biomeIndex = this.modelsRequiringBiomeColours.size() * this.biomes.size();
             MemoryUtil.memPutInt(uploadPtr, biomeIndex);
             this.modelsRequiringBiomeColours.add(new Pair<>(modelId, blockState));
 
-            uploadResult.biomeUploadIndex = biomeIndex;
-            long clrUploadPtr = (uploadResult.biomeUpload = new MemoryBuffer(4L * this.biomes.size())).address;
-            for (var biome : this.biomes) {
-                MemoryUtil.memPutInt(clrUploadPtr, captureColourConstant(colourProvider, blockState, biome)|0xFF000000); clrUploadPtr += 4;
+            if (!this.biomes.isEmpty()) {
+                uploadResult.biomeUploadIndex = biomeIndex;
+                long clrUploadPtr = (uploadResult.biomeUpload = new MemoryBuffer(4L * this.biomes.size())).address;
+                for (var biome : this.biomes) {
+                    int colour = biome == null ? -1 : (captureColourConstant(colourProvider, blockState, biome)|0xFF000000);
+                    MemoryUtil.memPutInt(clrUploadPtr, colour); clrUploadPtr += 4;
+                }
             }
         }
         uploadPtr += 4;
@@ -726,11 +752,13 @@ public class ModelFactory {
             int biomeIndex = (i++) * this.biomes.size();
             MemoryUtil.memPutLong(modelUpPtr, Integer.toUnsignedLong(entry.left())|(Integer.toUnsignedLong(biomeIndex)<<32));modelUpPtr+=8;
             long clrUploadPtr = result.biomeColourBuffer.address + biomeIndex * 4L;
+            //The shader indexes this LUT by raw biome id (colourData[colourTint + biomeId]), and `biomes` is
+            // sparse (padded with null for ids not seen yet), so every id must keep its own slot. Skipping a
+            // null without advancing the pointer compacts the colours down and leaves the tail of the buffer
+            // unwritten, which renders as black since the buffer is not zeroed.
             for (var biomeE : this.biomes) {
-                if (biomeE == null) {
-                    continue;//If null, ignore
-                }
-                MemoryUtil.memPutInt(clrUploadPtr, captureColourConstant(colourProvider, entry.right(), biomeE)|0xFF000000); clrUploadPtr += 4;
+                int colour = biomeE == null ? -1 : (captureColourConstant(colourProvider, entry.right(), biomeE)|0xFF000000);
+                MemoryUtil.memPutInt(clrUploadPtr, colour); clrUploadPtr += 4;
             }
         }
 

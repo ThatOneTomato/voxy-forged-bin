@@ -101,10 +101,11 @@ uvec3 makeRemainingAttributes(const in BlockModel model, const in Quad quad, uin
 
     vec4 tinting = getLighting(lighting);
 
-    uint conditionalTinting = 0;
-    if (tintColour != uint(-1)) {
-        conditionalTinting = tintColour;
-    }
+    //-1 means "no tint", which must multiply as white, not as zero. Mapping it to 0 here renders anything
+    // that reaches the tint path with an unresolved tint as solid black (e.g. a biome LUT slot that could
+    // not be resolved, or a colour provider that returned -1). 0xFFFFFFFF unpacks to white, so this is an
+    // identity multiply and the block keeps its texture colour.
+    uint conditionalTinting = tintColour;
 
     uint addin = 0;
     if (!isTranslucent) {
