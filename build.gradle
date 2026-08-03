@@ -1,3 +1,18 @@
+// ModDevGradle 2.0.42-beta pulls gradle-idea-ext 1.1.8 transitively (it uses it to generate the
+// IntelliJ run configurations). 1.1.8 is Groovy-3-era and compiles a hard call to
+// DefaultGroovyMethods.collect(Collection, Closure) - an overload Groovy 4 REMOVED. The Gradle 9
+// wrapper this project uses bundles Groovy 4, so every IntelliJ project import blew up with
+//   NoSuchMethodError: 'java.util.List ...DefaultGroovyMethods.collect(java.util.Collection, groovy.lang.Closure)'
+//   at org.jetbrains.gradle.ext.JavaRunConfiguration.toMap(RunConfigurations.groovy:119)
+// while `./gradlew build` from a terminal worked fine - the IDE sync is the only thing that walks
+// ProjectSettings.toString(). gradle-idea-ext 1.2 dropped that call, so pin it here. Remove once
+// ModDevGradle is bumped to a version that depends on 1.2 itself.
+buildscript {
+    configurations.classpath {
+        resolutionStrategy.force 'gradle.plugin.org.jetbrains.gradle.plugin.idea-ext:gradle-idea-ext:1.2'
+    }
+}
+
 plugins {
     id 'net.neoforged.moddev' version "2.0.42-beta"
     id 'maven-publish'
